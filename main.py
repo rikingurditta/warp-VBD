@@ -3,6 +3,7 @@ EPSILON = 1e-8
 import numpy as np
 import warp as wp
 import warp.render
+from neohookean import Neohookean
 
 wp.init()
 renderer = warp.render.OpenGLRenderer(draw_sky=False, draw_grid=False, draw_axis=False)
@@ -88,21 +89,20 @@ def deformation_gradient(V_undeformed: np.ndarray, V: np.ndarray) -> np.ndarray:
     return V.T * dphi_dX(V_undeformed)
 
 
-def E_neohookean_element(V_undeformed: np.ndarray, V: np.ndarray, mu_lamé: float, lambda_lamé: float) -> float:
+def E_neohookean_mesh(m_undeformed: Mesh, m: Mesh, mu_lamé: float, lambda_lamé: float) -> float:
     """
-    based on Psi_B from "Stable Neo-Hookean Flesh Simulation" [Smith et al. 2018]
-    E = C (J^{-2/3} trace(F^T F) - 3) + D (J - 1)^2
-    not sure if this just doesn't apply in 2D, let's just keep going and see
+    sum up neohookean energy for each element of mesh
+
+    :param m_undeformed: object-space mesh
+    :param m: world-space mesh - should have same E as m_undeformed
+    :param mu_lamé: Lamé parameter
+    :param lambda_lamé: Lamé parameter
+
+    :return: neohookean energy
     """
-    F = deformation_gradient(V_undeformed, V)
-    J = np.linalg.det(F)
-    return (0.5 * mu_lamé * (np.pow(J, -2 / 3) * np.linalg.trace(F.T @ F) - 3)
-            + 0.5 * lambda_lamé * (J - 1) ** 2)
+    neohookean = Neohookean(mu_lamé, lambda_lamé)
 
-
-def E_neohookean(m_undeformed: Mesh, m: Mesh, mu_lamé: float, lambda_lamé: float):
     E = 0
-    # sum up E for each element
     for i in range(m.E.shape[0]):
         v0 = m.E[i, 0]
         v1 = m.E[i, 0]
@@ -115,7 +115,8 @@ def E_neohookean(m_undeformed: Mesh, m: Mesh, mu_lamé: float, lambda_lamé: flo
         tri_x[0, :] = m.V[v0, :]
         tri_x[1, :] = m.V[v1, :]
         tri_x[2, :] = m.V[v2, :]
-        E += E_neohookean_element(tri_X, tri_x, mu_lamé, lambda_lamé)
+        F = deformation_gradient(tri_X, tri_x)
+        E += neohookean.E(F)
     return E
 
 
