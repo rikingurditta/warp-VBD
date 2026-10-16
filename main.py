@@ -1,57 +1,24 @@
+import neohookean
+from linear_elasticity import LinearElasticity
+from mesh import Mesh
+
 EPSILON = 1e-8
 
 import numpy as np
-import warp as wp
-import warp.render
+# import warp as wp
+# import warp.render
 from neohookean import Neohookean
 
-wp.init()
-renderer = warp.render.OpenGLRenderer(draw_sky=False, draw_grid=False, draw_axis=False)
 
-
-class Mesh:
-    """
-    right now just for 2d meshes
-    reads an OBJ file and discards z coordinate
-    """
-
-    def __init__(self, filename: str = None, V: np.ndarray = None, E: np.ndarray = None):
-        if filename is not None:
-            vertices = []
-            edges = []
-            with open(filename, "r") as f:
-                lines = f.readlines()
-                for line in lines:
-                    line_type = line[0]
-                    rest = line[2:]
-                    if line_type == "v":
-                        vertices.append([np.float64(x) for x in rest.split(" ")])
-                    if line_type == "e":
-                        edges.append([np.int64(x) for x in rest.split(" ")])
-            V = np.array(vertices, dtype=np.float64)
-            self.V = V[:, :2]
-            self.E = np.array(edges, dtype=np.int64)
-        elif V is not None and E is not None:
-            self.V = V
-            self.E = E
-        else:
-            raise Exception()
-
-        self.V_to_E = [[] for v in range(self.V.shape[0])]
-        for i in range(self.E.shape[0]):
-            for v in self.E[i, :]:
-                self.V_to_E[v].append(i)
-        print(self.V_to_E)
+# wp.init()
+# renderer = warp.render.OpenGLRenderer(draw_sky=False, draw_grid=False, draw_axis=False)
 
 
 def phi(V_undeformed: np.ndarray, X: np.ndarray):
     """
-    barycentric coordinates
-    expects:
-    - p0, p1, p2 are vertices of the triangle
-    - X is input position
-
-    returns barycentric coordinates of X
+    :param V_undeformed: (3,2) array, rows are positions of vertices of undeformed element
+    :param X: (2,) input position
+    :return: barycentric coordinates of X
     """
     p0 = V_undeformed[0, :]
     p1 = V_undeformed[1, :]
@@ -65,8 +32,12 @@ def phi(V_undeformed: np.ndarray, X: np.ndarray):
     return np.array([1 - l1 - l2, l1, l2])
 
 
-# derivative of barycentric coordinates wrt x
 def dphi_dX(V_undeformed: np.ndarray) -> np.ndarray:
+    """
+    :param V_undeformed: (3,2) array, rows are positions of vertices of undeformed element
+    :return: (3,2) matrix, derivative of barycentric coordinates wrt X
+    (barycentric coordinates are linear so this is a constant matrix which is why there is no X input)
+    """
     p0 = V_undeformed[0, :]
     p1 = V_undeformed[1, :]
     p2 = V_undeformed[2, :]
@@ -82,31 +53,28 @@ def dphi_dX(V_undeformed: np.ndarray) -> np.ndarray:
 
 def deformation_gradient(V_undeformed: np.ndarray, V: np.ndarray) -> np.ndarray:
     """
-    expects:
-    - V_undeformed is a 3x2 array, each row is coordinates of a vertex of the undeformed triangle
-    - V            is a 3x2 array, each row is coordinates of a vertex of the deformed triangle
+    :param V_undeformed: (3,2) array, rows are positions of vertices of undeformed element
+    :param V: (3,2) array, rows are positions of vertices of deformed element
+    :return: (2,2) deformation gradient F for element, aka dx/dX
     """
-    return V.T * dphi_dX(V_undeformed)
+    return V.T @ dphi_dX(V_undeformed)
 
 
-def E_neohookean_mesh(m_undeformed: Mesh, m: Mesh, mu_lamé: float, lambda_lamé: float) -> float:
+def E_neohookean_mesh(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> float:
     """
     sum up neohookean energy for each element of mesh
 
     :param m_undeformed: object-space mesh
     :param m: world-space mesh - should have same E as m_undeformed
-    :param mu_lamé: Lamé parameter
-    :param lambda_lamé: Lamé parameter
-
-    :return: neohookean energy
+    :param n: Neohookean energy object
+    :return: Meohookean energy
     """
-    neohookean = Neohookean(mu_lamé, lambda_lamé)
 
     E = 0
-    for i in range(m.E.shape[0]):
-        v0 = m.E[i, 0]
-        v1 = m.E[i, 0]
-        v2 = m.E[i, 0]
+    for e in range(m.E.shape[0]):
+        v0 = m.E[e, 0]
+        v1 = m.E[e, 1]
+        v2 = m.E[e, 2]
         tri_X = np.zeros((3, 2))
         tri_X[0, :] = m_undeformed.V[v0, :]
         tri_X[1, :] = m_undeformed.V[v1, :]
@@ -116,8 +84,106 @@ def E_neohookean_mesh(m_undeformed: Mesh, m: Mesh, mu_lamé: float, lambda_lamé
         tri_x[1, :] = m.V[v1, :]
         tri_x[2, :] = m.V[v2, :]
         F = deformation_gradient(tri_X, tri_x)
-        E += neohookean.E(F)
+        E += m.E_vol0[e] * n.psi(F)
     return E
+
+
+def dE_neohookean_mesh_dx(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> np.ndarray:
+    """
+    :param m_undeformed: object-space mesh
+    :param m: world-space mesh - should have same E as m_undeformed
+    :param n: Neohookean energy object
+    :return: gradient of Neohookean energy
+    """
+    dE_dx = np.zeros_like(m.x)
+    for e in range(m.E.shape[0]):
+        # vertex indices for current element
+        v0 = m.E[e, 0]
+        v1 = m.E[e, 1]
+        v2 = m.E[e, 2]
+        # undeformed element positions
+        tri_X = np.zeros((3, 2))
+        tri_X[0, :] = m_undeformed.V[v0, :]
+        tri_X[1, :] = m_undeformed.V[v1, :]
+        tri_X[2, :] = m_undeformed.V[v2, :]
+        # deformed element positions
+        tri_x = np.zeros((3, 2))
+        tri_x[0, :] = m.V[v0, :]
+        tri_x[1, :] = m.V[v1, :]
+        tri_x[2, :] = m.V[v2, :]
+
+        dphi = dphi_dX(tri_X)  # (3,2)
+        # B = dF/dx i think - based on lecture video
+        B = np.zeros((4, 6))
+        B[0:2, 0] = dphi[0, :]
+        B[2:4, 1] = dphi[0, :]
+        B[0:2, 2] = dphi[1, :]
+        B[2:4, 3] = dphi[1, :]
+        B[0:2, 4] = dphi[2, :]
+        B[2:4, 5] = dphi[2, :]
+
+        F = deformation_gradient(tri_X, tri_x)  # (2,2)
+        print('\nF:\n', F, '\n')
+        dpsi = n.dpsi_dF(F)  # (4,)
+        print('\ndpsi_dF:\n', dpsi, '\n')
+        dE = B.T @ dpsi * m.E_vol0[e]  # (6,)
+        dE_dx[v0 * 2:v0 * 2 + 2] += dE[0:2]
+        dE_dx[v1 * 2:v1 * 2 + 2] += dE[2:4]
+        dE_dx[v2 * 2:v2 * 2 + 2] += dE[4:6]
+    return dE_dx
+
+
+def d2E_neohookean_mesh_dx2(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> np.ndarray:
+    """
+    :param m_undeformed: object-space mesh
+    :param m: world-space mesh - should have same E as m_undeformed
+    :param n: Neohookean energy object
+    :return: hessian of Neohookean energy
+    """
+    d2E_dx2 = np.zeros((m.x.size, m.x.size))
+    for e in range(m.E.shape[0]):
+        # vertex indices for current element
+        v0 = m.E[e, 0]
+        v1 = m.E[e, 1]
+        v2 = m.E[e, 2]
+        # undeformed element positions
+        tri_X = np.zeros((3, 2))
+        tri_X[0, :] = m_undeformed.V[v0, :]
+        tri_X[1, :] = m_undeformed.V[v1, :]
+        tri_X[2, :] = m_undeformed.V[v2, :]
+        # deformed element positions
+        tri_x = np.zeros((3, 2))
+        tri_x[0, :] = m.V[v0, :]
+        tri_x[1, :] = m.V[v1, :]
+        tri_x[2, :] = m.V[v2, :]
+
+        dphi = dphi_dX(tri_X)  # (3,2)
+        # B = dF/dx i think - based on lecture video
+        B = np.zeros((4, 6))
+        B[0:2, 0] = dphi[0, :]
+        B[2:4, 1] = dphi[0, :]
+        B[0:2, 2] = dphi[1, :]
+        B[2:4, 3] = dphi[1, :]
+        B[0:2, 4] = dphi[2, :]
+        B[2:4, 5] = dphi[2, :]
+
+        F = deformation_gradient(tri_X, tri_x)  # (2,2)
+        d2psi = n.d2psi_dF2(F)  # (4,)
+        d2E = B.T @ d2psi @ B * m.E_vol0[e]  # (6,6)
+        d2E_dx2[v0 * 2:v0 * 2 + 2, v0 * 2:v0 * 2 + 2] += d2E[0:2, 0:2]
+        d2E_dx2[v0 * 2:v0 * 2 + 2, v1 * 2:v1 * 2 + 2] += d2E[0:2, 2:4]
+        d2E_dx2[v0 * 2:v0 * 2 + 2, v2 * 2:v2 * 2 + 2] += d2E[0:2, 4:6]
+        d2E_dx2[v1 * 2:v1 * 2 + 2, v0 * 2:v0 * 2 + 2] += d2E[2:4, 0:2]
+        d2E_dx2[v1 * 2:v1 * 2 + 2, v1 * 2:v1 * 2 + 2] += d2E[2:4, 2:4]
+        d2E_dx2[v1 * 2:v1 * 2 + 2, v2 * 2:v2 * 2 + 2] += d2E[2:4, 4:6]
+        d2E_dx2[v2 * 2:v2 * 2 + 2, v0 * 2:v0 * 2 + 2] += d2E[4:6, 0:2]
+        d2E_dx2[v2 * 2:v2 * 2 + 2, v1 * 2:v1 * 2 + 2] += d2E[4:6, 2:4]
+        d2E_dx2[v2 * 2:v2 * 2 + 2, v2 * 2:v2 * 2 + 2] += d2E[4:6, 4:6]
+    return d2E_dx2
+
+
+def E_kinetic(m: Mesh):
+    return 0.5 * m.v.T @ m.M @ m.v
 
 
 if __name__ == "__main__":
@@ -125,10 +191,39 @@ if __name__ == "__main__":
     p1 = np.array([1, 0])
     p2 = np.array([0.5, 1])
     V_undeformed = np.vstack([p0.reshape((1, 2)), p1.reshape((1, 2)), p2.reshape((1, 2))])
+    E = np.array([[0, 1, 2]])
+    m0 = Mesh(V=V_undeformed, E=E)
+    m0.precompute()
+    # check that volumes were precomputed properly
+    print('vols:\n', m0.E_vol0)
+
+    # create copy of m0 with all vertices rotated
+    m_deformed = Mesh(V=V_undeformed, E=E)
+    m_deformed.precompute()
+    theta = 0
+    rot = np.array([[np.cos(theta), -np.sin(theta)],
+                    [np.sin(theta), np.cos(theta)]])
+    centre = np.array([0, 0])
+    trans = np.array([0, 0])
+    for v in range(m_deformed.V.shape[0]):
+        m_deformed.V[v, :] = rot @ (m_deformed.V[v, :] - centre) + centre + trans
+
+    # n = Neohookean(1, 1)
+    n = LinearElasticity(1, 1)
+
+    print('V:\n', m0.V)
+    print('E:\n', m0.E)
+    print('V deformed:\n', m_deformed.V)
+    print()
+
+    print('E:\n', E_neohookean_mesh(m0, m_deformed, n),
+          '\ng:\n', dE_neohookean_mesh_dx(m0, m_deformed, n),
+          '\nH:\n', d2E_neohookean_mesh_dx2(m0, m_deformed, n))
+
+    # BAD!! looks like g is not 0 around rest position
 
     # each column is a colour
-    Colours = np.identity(3)
-
+    # Colours = np.identity(3)
     # points_array = []
     # colours_array = []
     # for i in np.arange(0, 1, 0.01):
@@ -137,7 +232,6 @@ if __name__ == "__main__":
     #         if np.linalg.norm(bar - np.clip(bar, 0, 1)) < EPSILON:
     #             points_array.append(np.array([i, j, 0]))
     #             colours_array.append(Colours @ bar)
-
     # while renderer.is_running():
     #     renderer.begin_frame()
     #     renderer.render_points(name="barycentric coordinates",
@@ -145,5 +239,3 @@ if __name__ == "__main__":
     #                            points=np.array(points_array),
     #                            colors=np.clip(np.array(colours_array), 0, 1))
     #     renderer.end_frame()
-    test = dphi_dX(V_undeformed)
-    print(test)
