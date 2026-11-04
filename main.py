@@ -1,5 +1,4 @@
-import neohookean
-from linear_elasticity import LinearElasticity
+from potential_energy import *
 from mesh import Mesh
 
 EPSILON = 1e-8
@@ -7,7 +6,6 @@ EPSILON = 1e-8
 import numpy as np
 # import warp as wp
 # import warp.render
-from neohookean import Neohookean
 
 
 # wp.init()
@@ -60,16 +58,15 @@ def deformation_gradient(V_undeformed: np.ndarray, V: np.ndarray) -> np.ndarray:
     return V.T @ dphi_dX(V_undeformed)
 
 
-def E_neohookean_mesh(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> float:
+def E_pot(m_undeformed: Mesh, m: Mesh, V_pot: PotentialEnergy) -> float:
     """
-    sum up neohookean energy for each element of mesh
+    sum up potential energy for each element of mesh
 
     :param m_undeformed: object-space mesh
     :param m: world-space mesh - should have same E as m_undeformed
-    :param n: Neohookean energy object
-    :return: Meohookean energy
+    :param V_pot: potential energy object
+    :return: potential energy of entire mesh
     """
-
     E = 0
     for e in range(m.E.shape[0]):
         v0 = m.E[e, 0]
@@ -84,16 +81,16 @@ def E_neohookean_mesh(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> float:
         tri_x[1, :] = m.V[v1, :]
         tri_x[2, :] = m.V[v2, :]
         F = deformation_gradient(tri_X, tri_x)
-        E += m.E_vol0[e] * n.psi(F)
+        E += m.E_vol0[e] * V_pot.psi(F)
     return E
 
 
-def dE_neohookean_mesh_dx(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> np.ndarray:
+def dE_pot_dx(m_undeformed: Mesh, m: Mesh, V_pot: PotentialEnergy) -> np.ndarray:
     """
     :param m_undeformed: object-space mesh
     :param m: world-space mesh - should have same E as m_undeformed
-    :param n: Neohookean energy object
-    :return: gradient of Neohookean energy
+    :param V_pot: potential energy object
+    :return: gradient of potential energy wrt vertices of mesh
     """
     dE_dx = np.zeros_like(m.x)
     for e in range(m.E.shape[0]):
@@ -123,9 +120,7 @@ def dE_neohookean_mesh_dx(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> np.ndar
         B[2:4, 5] = dphi[2, :]
 
         F = deformation_gradient(tri_X, tri_x)  # (2,2)
-        print('\nF:\n', F, '\n')
-        dpsi = n.dpsi_dF(F)  # (4,)
-        print('\ndpsi_dF:\n', dpsi, '\n')
+        dpsi = V_pot.dpsi_dF(F)  # (4,)
         dE = B.T @ dpsi * m.E_vol0[e]  # (6,)
         dE_dx[v0 * 2:v0 * 2 + 2] += dE[0:2]
         dE_dx[v1 * 2:v1 * 2 + 2] += dE[2:4]
@@ -133,12 +128,12 @@ def dE_neohookean_mesh_dx(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> np.ndar
     return dE_dx
 
 
-def d2E_neohookean_mesh_dx2(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> np.ndarray:
+def d2E_pot_dx2(m_undeformed: Mesh, m: Mesh, V_pot: PotentialEnergy) -> np.ndarray:
     """
     :param m_undeformed: object-space mesh
     :param m: world-space mesh - should have same E as m_undeformed
-    :param n: Neohookean energy object
-    :return: hessian of Neohookean energy
+    :param V_pot: potential energy object
+    :return: hessian of potential energy wrt vertices of mesh
     """
     d2E_dx2 = np.zeros((m.x.size, m.x.size))
     for e in range(m.E.shape[0]):
@@ -168,7 +163,7 @@ def d2E_neohookean_mesh_dx2(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> np.nd
         B[2:4, 5] = dphi[2, :]
 
         F = deformation_gradient(tri_X, tri_x)  # (2,2)
-        d2psi = n.d2psi_dF2(F)  # (4,)
+        d2psi = V_pot.d2psi_dF2(F)  # (4,)
         d2E = B.T @ d2psi @ B * m.E_vol0[e]  # (6,6)
         d2E_dx2[v0 * 2:v0 * 2 + 2, v0 * 2:v0 * 2 + 2] += d2E[0:2, 0:2]
         d2E_dx2[v0 * 2:v0 * 2 + 2, v1 * 2:v1 * 2 + 2] += d2E[0:2, 2:4]
@@ -212,9 +207,9 @@ if __name__ == "__main__":
     print('V deformed:\n', m_deformed.V)
     print()
 
-    print('E:\n', E_neohookean_mesh(m0, m_deformed, n),
-          '\ng:\n', dE_neohookean_mesh_dx(m0, m_deformed, n),
-          '\nH:\n', d2E_neohookean_mesh_dx2(m0, m_deformed, n))
+    print('E:\n', E_pot(m0, m_deformed, n),
+          '\ng:\n', dE_pot_dx(m0, m_deformed, n),
+          '\nH:\n', d2E_pot_dx2(m0, m_deformed, n))
 
     # BAD!! looks like g is not 0 around rest position
 
