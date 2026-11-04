@@ -113,7 +113,7 @@ def dE_neohookean_mesh_dx(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> np.ndar
         tri_x[2, :] = m.V[v2, :]
 
         dphi = dphi_dX(tri_X)  # (3,2)
-        # B = dF/dx i think - based on lecture video
+        # B = dF/dx - based on lecture video
         B = np.zeros((4, 6))
         B[0:2, 0] = dphi[0, :]
         B[2:4, 1] = dphi[0, :]
@@ -158,7 +158,7 @@ def d2E_neohookean_mesh_dx2(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> np.nd
         tri_x[2, :] = m.V[v2, :]
 
         dphi = dphi_dX(tri_X)  # (3,2)
-        # B = dF/dx i think - based on lecture video
+        # B = dF/dx - based on lecture video
         B = np.zeros((4, 6))
         B[0:2, 0] = dphi[0, :]
         B[2:4, 1] = dphi[0, :]
@@ -180,10 +180,6 @@ def d2E_neohookean_mesh_dx2(m_undeformed: Mesh, m: Mesh, n: Neohookean) -> np.nd
         d2E_dx2[v2 * 2:v2 * 2 + 2, v1 * 2:v1 * 2 + 2] += d2E[4:6, 2:4]
         d2E_dx2[v2 * 2:v2 * 2 + 2, v2 * 2:v2 * 2 + 2] += d2E[4:6, 4:6]
     return d2E_dx2
-
-
-def E_kinetic(m: Mesh):
-    return 0.5 * m.v.T @ m.M @ m.v
 
 
 if __name__ == "__main__":

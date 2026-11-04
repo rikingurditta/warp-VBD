@@ -47,7 +47,6 @@ class Mesh:
                 self.V_to_E[v].append(i)
 
         self.x = self.V.flatten()
-        self.v = np.zeros_like(self.x)
         self.E_vol0 = np.zeros(self.E.shape[0])  # = Area in 2D
         self.M = np.identity(self.x.size)
 
