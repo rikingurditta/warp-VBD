@@ -1,5 +1,3 @@
-from vtkmodules.vtkCommonMisc import VTK_PARSER_OR
-
 from potential_energy import *
 from mesh import Mesh
 
@@ -185,22 +183,25 @@ def d2E_pot_dx2(m_undeformed: Mesh, m: Mesh, V_pot: PotentialEnergy) -> np.ndarr
 
 
 def E_total(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, h: float) -> float:
-    vel = (m.V - m_prev.V) / h
-    y = m.V + h * vel
-    E_kin = 0.5 / h ** 2 * (m.V - y).flatten().dot(m.M @ (m.V - y).flatten())
-    return E_kin + E_pot(m_undeformed, m, V_pot)
+    vel = (m.x() - m_prev.x()) / h
+    y = m.x() + h * vel
+    E0_kin = 0.5 / h ** 2 * (m.x() - y).dot(m.M @ (m.x() - y))
+    E0_pot = E_pot(m_undeformed, m, V_pot)
+    return E0_kin + E0_pot
 
 
 def dE_total_dx(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, h: float) -> np.ndarray:
-    vel = (m.V - m_prev.V) / h
-    y = m.V + h * vel
-    dE_kin = m.M @ (m.V - y).flatten() / h ** 2
-    return dE_kin + dE_pot_dx(m_undeformed, m, V_pot)
+    vel = (m.x() - m_prev.x()) / h
+    y = m.x() + h * vel
+    dE0_kin = m.M @ (m.x() - y) / h ** 2
+    dE0_pot = dE_pot_dx(m_undeformed, m, V_pot)
+    return dE0_kin + dE0_pot
 
 
 def d2E_total_dx2(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, h: float) -> np.ndarray:
-    d2E_kin = m.M / h ** 2
-    return d2E_kin + d2E_pot_dx2(m_undeformed, m, V_pot)
+    d2E0_kin = m.M / h ** 2
+    d2E0_pot = d2E_pot_dx2(m_undeformed, m, V_pot)
+    return d2E0_kin + d2E0_pot
 
 
 def timestep(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, h: float) -> Mesh:
@@ -217,8 +218,7 @@ def timestep(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, 
     x = m_new.x()
     g = dE_total_dx(m_undeformed, m_new, m_prev, V_pot, h)
     steps = 0
-    while np.linalg.norm(g) > EPSILON and steps < 2:
-        # print(f'step {steps}')
+    while np.linalg.norm(g) > EPSILON and steps < 5:
         E = E_total(m_undeformed, m_new, m_prev, V_pot, h)
         g = dE_total_dx(m_undeformed, m_new, m_prev, V_pot, h)
         H = d2E_total_dx2(m_undeformed, m_new, m_prev, V_pot, h)
@@ -231,8 +231,6 @@ def timestep(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, 
 
             # 0.1 here is a parameter, seems like it changes the condition dramatically
             lin_est = E + alpha * 0.1 * g.dot(d)
-
-            # print(f'alpha: {np.log10(alpha):>5.5}\t\tE step: {E_step:>5.8}\t\tE lin est: {lin_est:>5.8}\t\tdiff: {E_step - lin_est:>5.8}')
 
             if E_step > lin_est:
                 # seems like this condition is always being hit D: what's up with that?
@@ -248,43 +246,28 @@ if __name__ == "__main__":
     m0.centre_at_zero()
     m0.precompute()
 
-    # create copy of m0
-    m_deformed = m0.copy()
-    m_deformed.precompute()
-    m_deformed.V[:, 1] *= 3
+    m_curr = m0.copy()
+    # m_deformed.V += np.array([1, 0])  # everything still works if i translate !!! woo !!!!!
+    m_curr.V[:, 1] *= 3
 
     # V_pot = Neohookean(1, 1)  # looks like g isn't 0 around rest ......... this is a problem for later
     V_pot = LinearElasticity(1, 1)
 
-    print('V:\n', m0.V)
-    print('E:\n', m0.E)
-    print('V deformed:\n', m_deformed.V)
-    print()
+    m_prev = m_curr.copy()
+    # m_prev.V += np.array([1, 0])  # can give initial velocity by nudging m_prev - this doesn't work!!!!!
 
-    EE = E_pot(m0, m_deformed, V_pot)
-    gg = dE_pot_dx(m0, m_deformed, V_pot)
-    HH = d2E_pot_dx2(m0, m_deformed, V_pot)
-
-    print(f'E:\t\t{EE}',
-          f'|g|:\t{np.linalg.norm(gg)}',
-          f'H:\n{HH}',
-          sep='\n')
-
-    cols = np.random.rand(m_deformed.V.shape[0], 3)
-    m_prev = m_deformed.copy()
+    h = 0.05
 
     frame = 0
-    t = renderer.time
     while renderer.is_running():
-        # print('frame:', frame)
+        m_next = timestep(m0, m_curr, m_prev, V_pot, h)
+        m_prev = m_curr
+        m_curr = m_next
+
         renderer.begin_frame()
-        t_new = renderer.time
-        print(t_new)
-        m_next = timestep(m0, m_deformed, m_prev, V_pot, 0.05)
-        m_prev = m_deformed.copy()
-        m_deformed = m_next
         renderer.render_mesh('undeformed', m0.V_3d(), m0.E, colors=(1, 1, 1))
-        renderer.render_mesh('deformed', m_deformed.V_3d(), m_deformed.E)
+        renderer.render_mesh('deformed', m_curr.V_3d(), m_curr.E)
         renderer.end_frame()
-        t = t_new
+
+        print(f'frame: {frame}')
         frame += 1
