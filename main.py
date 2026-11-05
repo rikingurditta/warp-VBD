@@ -6,15 +6,10 @@ import numpy as np
 import warp as wp
 import warp.render
 
-EPSILON = 1e-8
+from PIL import Image
+import subprocess
 
-wp.init()
-renderer = warp.render.OpenGLRenderer(draw_sky=False,
-                                      draw_grid=False,
-                                      draw_axis=False,
-                                      camera_pos=(0, 0, 4),
-                                      render_wireframe=True,
-                                      background_color=(1, 1, 1))
+EPSILON = 1e-8
 
 
 def phi(V_undeformed: np.ndarray, X: np.ndarray):
@@ -242,6 +237,23 @@ def timestep(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, 
     return m_new
 
 if __name__ == "__main__":
+    save_images = True
+    headless = False
+    screen_width = 1024
+    screen_height = 1024
+    max_frames = 100
+    h = 0.2
+    wp.init()
+    renderer = warp.render.OpenGLRenderer(draw_sky=False,
+                                          draw_grid=False,
+                                          draw_axis=False,
+                                          camera_pos=(0, 0, 4),
+                                          render_wireframe=True,
+                                          background_color=(1, 1, 1),
+                                          screen_width=screen_width,
+                                          screen_height=screen_height,
+                                          headless=headless)
+
     m0 = Mesh(filename='test_mesh.txt')
     m0.centre_at_zero()
     m0.precompute()
@@ -256,10 +268,8 @@ if __name__ == "__main__":
     m_prev = m_curr.copy()
     # m_prev.V += np.array([1, 0])  # can give initial velocity by nudging m_prev - this doesn't work!!!!!
 
-    h = 0.05
-
     frame = 0
-    while renderer.is_running():
+    while renderer.is_running() and frame < max_frames:
         m_next = timestep(m0, m_curr, m_prev, V_pot, h)
         m_prev = m_curr
         m_curr = m_next
@@ -269,5 +279,18 @@ if __name__ == "__main__":
         renderer.render_mesh('deformed', m_curr.V_3d(), m_curr.E)
         renderer.end_frame()
 
+        if save_images:
+            image = wp.empty((screen_height, screen_width, 3), dtype=wp.uint8, device='cuda')
+            renderer.get_pixels(image, split_up_tiles=False, use_uint8=True)
+            im = Image.fromarray(image.numpy())
+            im.save(f'frame{frame:03d}.png')
+
         print(f'frame: {frame}')
         frame += 1
+
+    if save_images:
+        print('making gif...')
+        subprocess.run(['magick', '*.png', 'animation.gif'])
+        print('deleting pngs...')
+        subprocess.run('rm *.png', shell=True)
+        print('done!')
