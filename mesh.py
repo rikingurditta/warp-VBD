@@ -46,9 +46,8 @@ class Mesh:
             for v in self.E[i, :]:
                 self.V_to_E[v].append(i)
 
-        self.x = self.V.flatten()
         self.E_vol0 = np.zeros(self.E.shape[0])  # = Area in 2D
-        self.M = np.identity(self.x.size)
+        self.M = np.identity(self.V.flatten().size)
 
     def precompute(self):
         self.E_vol0 = triangle_areas(self)
@@ -67,3 +66,28 @@ class Mesh:
                     if v != w:
                         self.M[v * 2, w * 2] += vol / 24
                         self.M[v * 2 + 1, w * 2 + 1] += vol / 24
+
+    def x(self) -> np.ndarray:
+        """
+        :return: view of V flattened row-wise (can be an lvalue)
+        """
+        return self.V.ravel()
+
+    def V_3d(self) -> np.ndarray:
+        """
+        :return: V embedded in 3d, aka a matrix whose xy columns are V and z column is 0
+        """
+        out = np.zeros((self.V.shape[0], 3))
+        out[:, 0:2] = self.V
+        return out
+
+    def copy(self) -> Mesh:
+        out = Mesh(V=self.V.copy(), E=self.E.copy())
+        out.M = self.M.copy()
+        out.V_to_E = self.V_to_E.copy()
+        out.E_vol0 = self.E_vol0.copy()
+        return out
+
+    def centre_at_zero(self):
+        avg = self.V.sum(axis=0) / self.V.shape[0]
+        self.V -= avg
