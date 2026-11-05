@@ -103,6 +103,7 @@ class Neohookean(PotentialEnergy):
         :param F: (2,2) deformation gradient
         :return: (4,) gradient of Neohookean energy psi wrt F (flattened into vector)
         """
+        # TODO: not 0 around rest!!!!!
         # used sympy
         F00 = F[0, 0]
         F01 = F[0, 1]
