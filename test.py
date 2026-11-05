@@ -25,14 +25,15 @@ def d2_dF2_finite_diff(func, F, epsilon=1e-9):
 if __name__ == "__main__":
     n = Neohookean(mu_lamé=1, lambda_lamé=1)
     l = LinearElasticity(mu_lamé=1, lambda_lamé=1)
-    model = l
+    model = n
     F = np.eye(2)
+    print('epsilon\t\tg diff\t\t\tH diff')
     for exp in range(7, 14):
-        print(f'1e-{exp}')
         g_fd = d_dF_finite_diff(model.psi, F, epsilon=10 ** (-exp))
         g_an = model.dpsi_dF(F)
-        print('g diff:', np.linalg.norm(g_fd - g_an))
+        g_diff = np.linalg.norm(g_fd - g_an)
         H_fd = d2_dF2_finite_diff(model.psi, F, epsilon=10 ** (-exp))
         H_an = model.d2psi_dF2(F)
-        print('H diff:', np.linalg.norm(H_fd - H_an))
-        print()
+        H_diff = np.linalg.norm(H_fd - H_an)
+
+        print(f'1e-{exp}\t\t{g_diff:>.5}\t\t{H_diff:>.5}')

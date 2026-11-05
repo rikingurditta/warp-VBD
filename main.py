@@ -1,15 +1,22 @@
+from vtkmodules.vtkCommonMisc import VTK_PARSER_OR
+
 from potential_energy import *
 from mesh import Mesh
 
+import numpy as np
+
+import warp as wp
+import warp.render
+
 EPSILON = 1e-8
 
-import numpy as np
-# import warp as wp
-# import warp.render
-
-
-# wp.init()
-# renderer = warp.render.OpenGLRenderer(draw_sky=False, draw_grid=False, draw_axis=False)
+wp.init()
+renderer = warp.render.OpenGLRenderer(draw_sky=False,
+                                      draw_grid=False,
+                                      draw_axis=False,
+                                      camera_pos=(0, 0, 4),
+                                      render_wireframe=True,
+                                      background_color=(1, 1, 1))
 
 
 def phi(V_undeformed: np.ndarray, X: np.ndarray):
@@ -92,7 +99,7 @@ def dE_pot_dx(m_undeformed: Mesh, m: Mesh, V_pot: PotentialEnergy) -> np.ndarray
     :param V_pot: potential energy object
     :return: gradient of potential energy wrt vertices of mesh
     """
-    dE_dx = np.zeros_like(m.x)
+    dE_dx = np.zeros_like(m.x())
     for e in range(m.E.shape[0]):
         # vertex indices for current element
         v0 = m.E[e, 0]
@@ -135,7 +142,7 @@ def d2E_pot_dx2(m_undeformed: Mesh, m: Mesh, V_pot: PotentialEnergy) -> np.ndarr
     :param V_pot: potential energy object
     :return: hessian of potential energy wrt vertices of mesh
     """
-    d2E_dx2 = np.zeros((m.x.size, m.x.size))
+    d2E_dx2 = np.zeros((m.x().size, m.x().size))
     for e in range(m.E.shape[0]):
         # vertex indices for current element
         v0 = m.E[e, 0]
@@ -177,56 +184,107 @@ def d2E_pot_dx2(m_undeformed: Mesh, m: Mesh, V_pot: PotentialEnergy) -> np.ndarr
     return d2E_dx2
 
 
+def E_total(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, h: float) -> float:
+    vel = (m.V - m_prev.V) / h
+    y = m.V + h * vel
+    E_kin = 0.5 / h ** 2 * (m.V - y).flatten().dot(m.M @ (m.V - y).flatten())
+    return E_kin + E_pot(m_undeformed, m, V_pot)
+
+
+def dE_total_dx(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, h: float) -> np.ndarray:
+    vel = (m.V - m_prev.V) / h
+    y = m.V + h * vel
+    dE_kin = m.M @ (m.V - y).flatten() / h ** 2
+    return dE_kin + dE_pot_dx(m_undeformed, m, V_pot)
+
+
+def d2E_total_dx2(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, h: float) -> np.ndarray:
+    d2E_kin = m.M / h ** 2
+    return d2E_kin + d2E_pot_dx2(m_undeformed, m, V_pot)
+
+
+def timestep(m_undeformed: Mesh, m: Mesh, m_prev: Mesh, V_pot: PotentialEnergy, h: float) -> Mesh:
+    """
+    Timestep using Newton's method with backtracking line search
+    :param m_undeformed: undeformed mesh
+    :param m: deformed mesh, m^k
+    :param m_prev: deformed mesh at prev timestep, m^{k-1}
+    :param V_pot: potential energy function
+    :param h: timestep size
+    :return: deformed mesh at next timestep, m^{k+1}
+    """
+    m_new = m.copy()
+    x = m_new.x()
+    g = dE_total_dx(m_undeformed, m_new, m_prev, V_pot, h)
+    steps = 0
+    while np.linalg.norm(g) > EPSILON and steps < 2:
+        # print(f'step {steps}')
+        E = E_total(m_undeformed, m_new, m_prev, V_pot, h)
+        g = dE_total_dx(m_undeformed, m_new, m_prev, V_pot, h)
+        H = d2E_total_dx2(m_undeformed, m_new, m_prev, V_pot, h)
+        d = np.linalg.solve(H, -g)
+        x0 = x.copy()
+        alpha = 1.0
+        while alpha > EPSILON:
+            x[:] = x0 + alpha * d
+            E_step = E_total(m_undeformed, m_new, m_prev, V_pot, h)
+
+            # 0.1 here is a parameter, seems like it changes the condition dramatically
+            lin_est = E + alpha * 0.1 * g.dot(d)
+
+            # print(f'alpha: {np.log10(alpha):>5.5}\t\tE step: {E_step:>5.8}\t\tE lin est: {lin_est:>5.8}\t\tdiff: {E_step - lin_est:>5.8}')
+
+            if E_step > lin_est:
+                # seems like this condition is always being hit D: what's up with that?
+                alpha *= 0.5
+            else:
+                break
+        x[:] = x0 + alpha * d
+        steps += 1
+    return m_new
+
 if __name__ == "__main__":
-    p0 = np.array([0, 0])
-    p1 = np.array([1, 0])
-    p2 = np.array([0.5, 1])
-    V_undeformed = np.vstack([p0.reshape((1, 2)), p1.reshape((1, 2)), p2.reshape((1, 2))])
-    E = np.array([[0, 1, 2]])
-    m0 = Mesh(V=V_undeformed, E=E)
+    m0 = Mesh(filename='test_mesh.txt')
+    m0.centre_at_zero()
     m0.precompute()
-    # check that volumes were precomputed properly
-    print('vols:\n', m0.E_vol0)
 
-    # create copy of m0 with all vertices rotated
-    m_deformed = Mesh(V=V_undeformed, E=E)
+    # create copy of m0
+    m_deformed = m0.copy()
     m_deformed.precompute()
-    theta = 0
-    rot = np.array([[np.cos(theta), -np.sin(theta)],
-                    [np.sin(theta), np.cos(theta)]])
-    centre = np.array([0, 0])
-    trans = np.array([0, 0])
-    for v in range(m_deformed.V.shape[0]):
-        m_deformed.V[v, :] = rot @ (m_deformed.V[v, :] - centre) + centre + trans
+    m_deformed.V[:, 1] *= 3
 
-    # n = Neohookean(1, 1)
-    n = LinearElasticity(1, 1)
+    # V_pot = Neohookean(1, 1)  # looks like g isn't 0 around rest ......... this is a problem for later
+    V_pot = LinearElasticity(1, 1)
 
     print('V:\n', m0.V)
     print('E:\n', m0.E)
     print('V deformed:\n', m_deformed.V)
     print()
 
-    print('E:\n', E_pot(m0, m_deformed, n),
-          '\ng:\n', dE_pot_dx(m0, m_deformed, n),
-          '\nH:\n', d2E_pot_dx2(m0, m_deformed, n))
+    EE = E_pot(m0, m_deformed, V_pot)
+    gg = dE_pot_dx(m0, m_deformed, V_pot)
+    HH = d2E_pot_dx2(m0, m_deformed, V_pot)
 
-    # BAD!! looks like g is not 0 around rest position
+    print(f'E:\t\t{EE}',
+          f'|g|:\t{np.linalg.norm(gg)}',
+          f'H:\n{HH}',
+          sep='\n')
 
-    # each column is a colour
-    # Colours = np.identity(3)
-    # points_array = []
-    # colours_array = []
-    # for i in np.arange(0, 1, 0.01):
-    #     for j in np.arange(0, 1, 0.01):
-    #         bar = phi(V_undeformed, np.array([i, j]))
-    #         if np.linalg.norm(bar - np.clip(bar, 0, 1)) < EPSILON:
-    #             points_array.append(np.array([i, j, 0]))
-    #             colours_array.append(Colours @ bar)
-    # while renderer.is_running():
-    #     renderer.begin_frame()
-    #     renderer.render_points(name="barycentric coordinates",
-    #                            radius=0.01,
-    #                            points=np.array(points_array),
-    #                            colors=np.clip(np.array(colours_array), 0, 1))
-    #     renderer.end_frame()
+    cols = np.random.rand(m_deformed.V.shape[0], 3)
+    m_prev = m_deformed.copy()
+
+    frame = 0
+    t = renderer.time
+    while renderer.is_running():
+        # print('frame:', frame)
+        renderer.begin_frame()
+        t_new = renderer.time
+        print(t_new)
+        m_next = timestep(m0, m_deformed, m_prev, V_pot, 0.05)
+        m_prev = m_deformed.copy()
+        m_deformed = m_next
+        renderer.render_mesh('undeformed', m0.V_3d(), m0.E, colors=(1, 1, 1))
+        renderer.render_mesh('deformed', m_deformed.V_3d(), m_deformed.E)
+        renderer.end_frame()
+        t = t_new
+        frame += 1
