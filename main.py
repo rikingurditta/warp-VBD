@@ -8,21 +8,21 @@ import warp as wp
 import warp.render
 
 from PIL import Image
-import subprocess
-
+import subprocess  # basic system calls + gifski for creating gifs
+from datetime import datetime
 
 if __name__ == "__main__":
-    save_gif = False
-    headless = False
+    save_gif = True
+    headless = True
     screen_width = 1024
     screen_height = 1024
-    max_frames = 1e100
-    h = 0.2
+    max_frames = 500
+    h = 0.02
     wp.init()
     renderer = warp.render.OpenGLRenderer(draw_sky=False,
                                           draw_grid=False,
                                           draw_axis=False,
-                                          camera_pos=(0, 0, 4),
+                                          camera_pos=(2, 0, 10),
                                           render_wireframe=True,
                                           background_color=(1, 1, 1),
                                           screen_width=screen_width,
@@ -35,18 +35,17 @@ if __name__ == "__main__":
 
     m_curr = m0.copy()
     # m_deformed.V += np.array([1, 0])  # everything still works if i translate !!! woo !!!!!
-    m_curr.V[:, 1] *= 1.5
+    m_curr.V[:, 1] *= 0.5
 
-    m_prev = m_curr.copy()
-    # m_prev.V[:, 1] *= 1.99
-    # m_prev.V += np.array([-0.01, 0])  # can give initial velocity by nudging m_prev - this doesn't work!!!!!
+    m_prev = m0.copy()
+    m_prev.V[:, 1] *= 0.5
+    m_prev.V += np.array([-0.005, 0])  # can give initial velocity by nudging m_prev
 
     s = Simulation(m0, LinearElasticity(1, 1))
 
     if save_gif:
         subprocess.run(['mkdir', 'run'])
         subprocess.run('rm run/*', shell=True)
-
 
     frame = 0
     while renderer.is_running() and frame < max_frames:
@@ -70,8 +69,8 @@ if __name__ == "__main__":
         frame += 1
 
     if save_gif:
+        subprocess.run(['mkdir', 'animations'])
         print('making gif...')
-        subprocess.run(['magick', 'run/*.png', 'run/animation.gif'])
-        print('deleting pngs...')
-        subprocess.run('rm *.png', shell=True)
+        time = datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
+        subprocess.run(f'gifski --output animations/ani-{time}.gif --fps 60 run/*.png', shell=True)
         print('done!')

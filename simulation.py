@@ -51,7 +51,6 @@ def deformation_gradient(V_undeformed: np.ndarray, V: np.ndarray) -> np.ndarray:
     return V.T @ dphi_dX(V_undeformed)
 
 
-
 class Simulation:
     def __init__(self, m_undeformed: Mesh, V_pot: PotentialEnergy):
         self.m_undeformed = m_undeformed
@@ -167,21 +166,19 @@ class Simulation:
             d2E_dx2[v2 * 2:v2 * 2 + 2, v2 * 2:v2 * 2 + 2] += d2E[4:6, 4:6]
         return d2E_dx2
 
-    def E_total(self, m: Mesh, m_prev: Mesh, h: float, m_temp: Mesh) -> float:
-        vel = (m.x() - m_prev.x()) / h
+    def E_total(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> float:
         y = m.x() + h * vel
         E0_kin = 0.5 / h ** 2 * (m_temp.x() - y).dot(m.M @ (m_temp.x() - y))
         E0_pot = self.E_pot(m)
         return E0_kin + E0_pot
 
-    def dE_total_dx(self, m: Mesh, m_prev: Mesh, h: float, m_temp: Mesh) -> np.ndarray:
-        vel = (m.x() - m_prev.x()) / h
+    def dE_total_dx(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> npVector:
         y = m.x() + h * vel
         dE0_kin = m.M @ (m_temp.x() - y) / h ** 2
         dE0_pot = self.dE_pot_dx(m)
         return dE0_kin + dE0_pot
 
-    def d2E_total_dx2(self, m: Mesh, m_prev: Mesh, h: float, m_temp: Mesh) -> np.ndarray:
+    def d2E_total_dx2(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> npMatrix:
         d2E0_kin = m.M / h ** 2
         d2E0_pot = self.d2E_pot_dx2(m)
         return d2E0_kin + d2E0_pot
@@ -189,33 +186,37 @@ class Simulation:
     def timestep(self, m: Mesh, m_prev: Mesh, h: float) -> Mesh:
         """
         Timestep using Newton's method with backtracking line search
-        :param m_undeformed: undeformed mesh
         :param m: deformed mesh, m^k
         :param m_prev: deformed mesh at prev timestep, m^{k-1}
-        :param V_pot: potential energy function
         :param h: timestep size
         :return: deformed mesh at next timestep, m^{k+1}
         """
+        vel = (m.x() - m_prev.x()) / h
         m_new = m.copy()
-        x = m_new.x()
-        x += h * (x - m_prev.x()) / h
-        g = self.dE_total_dx(m_new, m_prev, h, m_new)
+        x = m_new.x()  # .x() returns a view, so x refers to the same data as m_new.V
+        x[:] += h * (x - m_prev.x()) / h  # so this line also edits m_new.V
+        # print('energy:', self.E_total(m, m_prev, h, m))
+        g = self.dE_total_dx(m_new, vel, h, m_new)
         steps = 0
-        while np.linalg.norm(g) > EPSILON and steps < 10:
-            E = self.E_total(m, m_prev, h, m_new)
-            g = self.dE_total_dx(m, m_prev, h, m_new)
-            H = self.d2E_total_dx2(m, m_prev, h, m_new)
+        while np.linalg.norm(g) > EPSILON and steps < 100:
+            g = self.dE_total_dx(m, vel, h, m_new)
+            H = self.d2E_total_dx2(m, vel, h, m_new)
             d = np.linalg.solve(H, -g)
             x0 = x.copy()
             alpha = 1.0
+            # line search doesn't work, but simulation MOSTLY works without it (seems to be gaining energy)
+            # also, VBD doesn't need line search
+            # E = self.E_total(m, vel, h, m_new)
             # while alpha > EPSILON:
             #     x[:] = x0 + alpha * d
             #     E_step = self.E_total(m, m_prev, h, m_new)
             #
-            #     # 0.1 here is a parameter, seems like it changes the condition dramatically
-            #     lin_est = E + alpha * 0.1 * g.dot(d)
+            #     # coefficient in front of linear term is a parameter, seems like it changes the condition dramatically
+            #     lin_est = E + 0.1 * alpha * g.dot(d)
             #
-            #     if E_step > lin_est:
+            #     print(f'alpha={alpha:5.5}\t\tE_step={E_step:5.5}\t\tlin_est={lin_est:5.5}')
+            #
+            #     if E_step >= lin_est:
             #         # seems like this condition is always being hit D: what's up with that?
             #         alpha *= 0.5
             #     else:
