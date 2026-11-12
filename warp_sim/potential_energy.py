@@ -74,7 +74,7 @@ def d2psi_dF2_linear(params: MaterialParams, F: wp.mat22) -> wp.mat44:
     H[1, 3] = F01*F11*params.lambda_lame+params.mu_lame*(F00*F10+2.*F01*F11)
     H[2, 0] = F00*F10*params.lambda_lame+params.mu_lame*(2.*F00*F10+F01*F11)
     H[2, 1] = F00*F11*params.mu_lame+F01*F10*params.lambda_lame
-    H[2, 2.] = F10**2.*params.lambda_lame+params.lambda_lame*(0.5*F_sqnorm-1.)+params.mu_lame*(F00**2.+3.*F10**2.+F11**2.-1.)
+    H[2, 2] = F10**2.*params.lambda_lame+params.lambda_lame*(0.5*F_sqnorm-1.)+params.mu_lame*(F00**2.+3.*F10**2.+F11**2.-1.)
     H[2, 3] = F10*F11*params.lambda_lame+params.mu_lame*(F00*F01+2.*F10*F11)
     H[3, 0] = F00*F11*params.lambda_lame+F01*F10*params.mu_lame
     H[3, 1] = F01*F11*params.lambda_lame+params.mu_lame*(F00*F10+2.*F01*F11)
