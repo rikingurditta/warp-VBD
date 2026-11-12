@@ -7,6 +7,12 @@ EPSILON = 1e-8
 
 
 @wp.kernel
+def M_times_vec(M: wp.array2d[wp.mat22f], vec: wp.array[wp.vec2f], result: wp.array[wp.vec2f]):
+    tid = wp.tid()
+    for i in range(M.shape[1]):
+        result[tid] += M[tid, i] @ vec[i]
+
+@wp.kernel
 def phi(E_dphi_dX: wp.array[mat32f],
         X: wp.array[wp.vec2],
         phi_vec: wp.array[wp.vec3]):
@@ -65,77 +71,78 @@ def dE_pot_dx(E: wp.array2d[int],
     dpsi = dpsi_dF_linear(params, F)  # (4,)
     dE = wp.transpose(B) @ dpsi * E_vol0[element]  # (6,)
     v0 = E[element, 0]
-    v1 = E[element, 0]
-    v2 = E[element, 0]
+    v1 = E[element, 1]
+    v2 = E[element, 2]
     # this should use atomic_add by default so it should be thread-safe
     denergy[v0] += dE[0:2]
     denergy[v1] += dE[2:4]
     denergy[v2] += dE[4:6]
 
+@wp.kernel
+def d2E_pot_dx2(E: wp.array2d[int],
+                Fs: wp.array[wp.mat22f],
+                E_dphi_dX: wp.array[mat32f],
+                E_vol0: wp.array[float],
+                params: MaterialParams,
+                d2energy: wp.array2d[wp.mat22f]):
+    element = wp.tid()
 
-# @wp.kernel
-# def d2E_pot_dx2(E: wp.array2d[int],
-#                 Fs: wp.array[wp.mat22f],
-#                 E_dphi_dX: wp.array[mat32f],
-#                 E_vol0: wp.array[float],
-#                 params: MaterialParams,
-#                 d2energy: wp.array2d[wp.mat22f]):
-#     element = wp.tid()
-#
-#     dphi = E_dphi_dX[element]
-#     # B = dF/dx - based on lecture video
-#     B = wp.matrix(shape=(4, 6), dtype=float)
-#     B[0:2, 0] = dphi[0, :]
-#     B[2:4, 1] = dphi[0, :]
-#     B[0:2, 2] = dphi[1, :]
-#     B[2:4, 3] = dphi[1, :]
-#     B[0:2, 4] = dphi[2, :]
-#     B[2:4, 5] = dphi[2, :]
-#
-#     F = Fs[element]
-#     d2psi = d2psi_dF2_linear(params, F)  # (4,)
-#     d2E = wp.transpose(B) @ d2psi @ B * E_vol0[element]  # (6,6)
-#     v0 = E[element, 0]
-#     v1 = E[element, 0]
-#     v2 = E[element, 0]
-#     d2energy[v0, v0] += d2E[0:2, 0:2]
-#     d2energy[v0, v1] += d2E[0:2, 2:4]
-#     d2energy[v0, v2] += d2E[0:2, 4:6]
-#     d2energy[v1, v0] += d2E[2:4, 0:2]
-#     d2energy[v1, v1] += d2E[2:4, 2:4]
-#     d2energy[v1, v2] += d2E[2:4, 4:6]
-#     d2energy[v2, v0] += d2E[4:6, 0:2]
-#     d2energy[v2, v1] += d2E[4:6, 2:4]
-#     d2energy[v2, v2] += d2E[4:6, 4:6]
+    dphi = E_dphi_dX[element]
+    # B = dF/dx - based on lecture video
+    B = wp.matrix(shape=(4, 6), dtype=float)
+    B[0:2, 0] = dphi[0, :]
+    B[2:4, 1] = dphi[0, :]
+    B[0:2, 2] = dphi[1, :]
+    B[2:4, 3] = dphi[1, :]
+    B[0:2, 4] = dphi[2, :]
+    B[2:4, 5] = dphi[2, :]
 
+    F = Fs[element]
+    d2psi = d2psi_dF2_linear(params, F)  # (4,)
+    d2E = wp.transpose(B) @ d2psi @ B * E_vol0[element]  # (6,)
+    v0 = E[element, 0]
+    v1 = E[element, 1]
+    v2 = E[element, 2]
+    d2energy[v0, v0] += d2E[0:2, 0:2]
+    d2energy[v0, v1] += d2E[0:2, 2:4]
+    d2energy[v0, v2] += d2E[0:2, 4:6]
+    d2energy[v1, v0] += d2E[2:4, 0:2]
+    d2energy[v1, v1] += d2E[2:4, 2:4]
+    d2energy[v1, v2] += d2E[2:4, 4:6]
+    d2energy[v2, v0] += d2E[4:6, 0:2]
+    d2energy[v2, v1] += d2E[4:6, 2:4]
+    d2energy[v2, v2] += d2E[4:6, 4:6]
 
 class Simulation:
     def __init__(self, m_undeformed: WarpMesh, params: MaterialParams):
         self.num_elements = m_undeformed.E.shape[0]
+        self.num_verts = m_undeformed.x.shape[0]
         self.m_undeformed = m_undeformed
         self.params = params
-        self.Fs = wp.empty(shape=num_elements, dtype=wp.mat22f)
+        self.Fs = wp.empty(shape=self.num_elements, dtype=wp.mat22f)
 
     def compute_Fs(self, wm: WarpMesh):
         wp.launch(kernel=deformation_gradient,
-                  dim=num_elements,
-                  inputs=[wm.V, wm0.E, wm0.E_dphi_dX, self.Fs],
+                  dim=self.num_elements,
+                  inputs=[wm.x, self.m_undeformed.E, self.m_undeformed.E_dphi_dX, self.Fs],
                   device='cuda')
 
-    def E_pot(self) -> float:
-        energy = wp.empty(shape=num_elements, dtype=float)
+    def E_total(self, m_curr: WarpMesh, vel: wp.array[wp.vec2f], h: float, wm: WarpMesh) -> float:
+        potential_energy = wp.empty(shape=self.num_elements, dtype=float)
         wp.launch(kernel=E_pot,
-                  dim=num_elements,
-                  inputs=[self.Fs, self.m_undeformed.E_vol0, self.params, energy],
+                  dim=self.num_elements,
+                  inputs=[self.Fs, self.m_undeformed.E_vol0, self.params, potential_energy],
                   device='cuda')
-        return wp.utils.array_sum(energy)
-#
-#     def E_total(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> float:
-#         y = m.x() + h * vel
-#         E0_kin = 0.5 / h ** 2 * (m_temp.x() - y).dot(m.M @ (m_temp.x() - y))
-#         E0_pot = self.E_pot(m)
-#         return E0_kin + E0_pot
-#
+        V = wp.utils.array_sum(potential_energy)
+        y = m_curr.x + h * vel
+        prod = wp.empty(shape=self.num_verts, dtype=wp.vec2f)
+        wp.launch(kernel=M_times_vec,
+                  dim=self.num_verts,
+                  inputs=[m_curr.M, wm.x - y, prod],
+                  device='cuda')
+        K = 0.5 / h ** 2 * wp.utils.array_inner(wm.x - y, prod)
+        return V + K
+
 #     def dE_total_dx(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> npVector:
 #         y = m.x() + h * vel
 #         dE0_kin = m.M @ (m_temp.x() - y) / h ** 2
@@ -189,20 +196,40 @@ class Simulation:
 #             steps += 1
 #         return m_new
 
-
-if __name__ == '__main__':
+def main_func():
     m0 = Mesh(filename='../test_mesh.txt')
     m0.precompute()
     m_def = m0.copy()
     m_def.V[:, 1] *= 2
-    num_elements = m0.E.shape[0]
-    params = MaterialParams()
-    params.mu_lame = 1.
-    params.lambda_lame = 1.
+    p = MaterialParams()
+    p.mu_lame = 1.
+    p.lambda_lame = 1.
+
     wm0 = WarpMesh(m0)
     wm0.precompute()
     wm_def = WarpMesh(m_def)
 
-    s = Simulation(wm0, params)
+    h = 0.1
+
+    s = Simulation(wm0, p)
     s.compute_Fs(wm_def)
-    print(s.E_pot())
+    vel = wm_def.x - wm0.x
+    print('total energy:', s.E_total(wm_def, vel, h, wm_def))
+
+    dE = wp.empty(s.num_verts, dtype=wp.vec2f)
+    wp.launch(kernel=dE_pot_dx,
+              dim=s.num_elements,
+              inputs=[wm0.E, s.Fs, wm0.E_dphi_dX, wm0.E_vol0, p, dE],
+              device='cuda')
+    # print(dE.numpy())
+
+    d2E = wp.empty((s.num_verts, s.num_verts), dtype=wp.mat22f)
+    wp.launch(kernel=d2E_pot_dx2,
+              dim=s.num_elements,
+              inputs=[wm0.E, s.Fs, wm0.E_dphi_dX, wm0.E_vol0, p, d2E],
+              device='cuda')
+    # print(d2E.numpy())
+
+
+if __name__ == '__main__':
+    main_func()

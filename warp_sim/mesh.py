@@ -10,15 +10,20 @@ class WarpMesh:
     def __init__(self, m: Mesh | None):
         if m is not None:
             m.precompute()
-            self.V = wp.array(m.V, dtype=float).view(dtype=wp.vec2f)
+            num_verts = m.V.shape[0]
+            self.x = wp.array(m.V, dtype=float).view(dtype=wp.vec2f)
             self.E = wp.array(m.E, dtype=int)
-            self.M = wp.array(m.M, dtype=float)
+            self.M = wp.empty((num_verts, num_verts), dtype=wp.mat22f)
+            wp.launch(kernel=flat_M_to_mat22f,
+                      dim=(num_verts, num_verts),
+                      inputs=[wp.array(m.M, dtype=float), self.M],
+                      device='cuda')
             self.V_to_E = m.V_to_E
             self.E_vol0 = wp.array(m.E_vol0, dtype=float)
 
     def copy(self) -> WarpMesh:
         out = WarpMesh(None)
-        out.V = wp.clone(self.V)
+        out.x = wp.clone(self.x)
         out.E = wp.clone(self.E)
         out.M = wp.clone(self.M)
         out.V_to_E = self.V_to_E.copy()
@@ -30,7 +35,7 @@ class WarpMesh:
         self.E_dphi_dX = wp.empty(self.E.shape[0], dtype=wp.types.matrix(shape=(3, 2), dtype=float))
         wp.launch(kernel=compute_dphi_dX,
                   dim=self.E.shape[0],
-                  inputs=[self.V, self.E, self.E_dphi_dX],
+                  inputs=[self.x, self.E, self.E_dphi_dX],
                   device='cuda')
 
 
@@ -53,6 +58,17 @@ def compute_dphi_dX(V: wp.array[wp.vec2f],
     out[0, :] = -(Tinv[0, :] + Tinv[1, :])
     out[1:, :] = Tinv
     E_dphi_dX[element] = out
+
+
+@wp.kernel
+def flat_M_to_mat22f(flat_M: wp.array2d[float], M: wp.array2d[wp.mat22f]):
+    v0, v1 = wp.tid()
+    block = wp.mat22f()
+    block[0, 0] = flat_M[v0 * 2, v1 * 2]
+    block[0, 1] = flat_M[v0 * 2, v1 * 2 + 1]
+    block[1, 0] = flat_M[v0 * 2 + 1, v1 * 2]
+    block[1, 1] = flat_M[v0 * 2 + 1, v1 * 2 + 1]
+    M[v0, v1] = block
 
 
 if __name__ == "__main__":
