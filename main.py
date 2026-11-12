@@ -1,6 +1,6 @@
-from potential_energy import *
-from mesh import Mesh
-from simulation import Simulation
+from numpy_sim.potential_energy import *
+from numpy_sim.mesh import Mesh
+from numpy_sim.simulation import Simulation
 
 import numpy as np
 

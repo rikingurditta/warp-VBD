@@ -1,6 +1,6 @@
 import numpy as np
-from mesh import Mesh
-from potential_energy import PotentialEnergy
+from numpy_sim.mesh import Mesh
+from numpy_sim.potential_energy import PotentialEnergy
 
 EPSILON = 1e-8
 

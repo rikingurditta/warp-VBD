@@ -1,7 +1,7 @@
 # test if gradients and hessians are correct (i.e., match up with finite differences)
 
 import numpy as np
-from potential_energy import LinearElasticity, Neohookean
+from numpy_sim.potential_energy import LinearElasticity, Neohookean
 
 def d_dF_finite_diff(func, F, epsilon=1e-9):
     out = np.zeros(4)
