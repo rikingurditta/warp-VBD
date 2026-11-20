@@ -166,22 +166,25 @@ class Simulation:
             d2E_dx2[v2 * 2:v2 * 2 + 2, v2 * 2:v2 * 2 + 2] += d2E[4:6, 4:6]
         return d2E_dx2
 
-    def E_total(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> float:
+    def E_step(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> float:
         y = m.x() + h * vel
         E0_kin = 0.5 / h ** 2 * (m_temp.x() - y).dot(m.M @ (m_temp.x() - y))
         E0_pot = self.E_pot(m)
         return E0_kin + E0_pot
 
-    def dE_total_dx(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> npVector:
+    def dE_step_dx(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> npVector:
         y = m.x() + h * vel
         dE0_kin = m.M @ (m_temp.x() - y) / h ** 2
         dE0_pot = self.dE_pot_dx(m)
         return dE0_kin + dE0_pot
 
-    def d2E_total_dx2(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> npMatrix:
+    def d2E_step_dx2(self, m: Mesh, vel: np.ndarray, h: float, m_temp: Mesh) -> npMatrix:
         d2E0_kin = m.M / h ** 2
         d2E0_pot = self.d2E_pot_dx2(m)
         return d2E0_kin + d2E0_pot
+
+    def E_total(self, m: Mesh, vel: np.ndarray):
+        return self.E_pot(m) + 0.5 * vel.dot(m.M @ vel)
 
     def timestep(self, m: Mesh, m_prev: Mesh, h: float) -> Mesh:
         """
@@ -196,11 +199,11 @@ class Simulation:
         x = m_new.x()  # .x() returns a view, so x refers to the same data as m_new.V
         x[:] += h * (x - m_prev.x()) / h  # so this line also edits m_new.V
         # print('energy:', self.E_total(m, m_prev, h, m))
-        g = self.dE_total_dx(m_new, vel, h, m_new)
+        g = self.dE_step_dx(m_new, vel, h, m_new)
         steps = 0
         while np.linalg.norm(g) > EPSILON and steps < 100:
-            g = self.dE_total_dx(m, vel, h, m_new)
-            H = self.d2E_total_dx2(m, vel, h, m_new)
+            g = self.dE_step_dx(m, vel, h, m_new)
+            H = self.d2E_step_dx2(m, vel, h, m_new)
             d = np.linalg.solve(H, -g)
             x0 = x.copy()
             alpha = 1.0
@@ -209,12 +212,12 @@ class Simulation:
             # E = self.E_total(m, vel, h, m_new)
             # while alpha > EPSILON:
             #     x[:] = x0 + alpha * d
-            #     E_step = self.E_total(m, m_prev, h, m_new)
+            #     E_step = self.E_total(m, vel, h, m_new)
             #
             #     # coefficient in front of linear term is a parameter, seems like it changes the condition dramatically
             #     lin_est = E + 0.1 * alpha * g.dot(d)
             #
-            #     print(f'alpha={alpha:5.5}\t\tE_step={E_step:5.5}\t\tlin_est={lin_est:5.5}')
+            #     # print(f'alpha={alpha:5.5}\t\tE_step={E_step:5.5}\t\tlin_est={lin_est:5.5}')
             #
             #     if E_step >= lin_est:
             #         # seems like this condition is always being hit D: what's up with that?

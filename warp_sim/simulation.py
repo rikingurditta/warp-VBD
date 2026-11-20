@@ -7,6 +7,10 @@ import warp.render as render
 
 import numpy as np
 
+from warp_sim.util import sparse_mat_array_to_numpy_blocks
+
+np.set_printoptions(suppress=True)
+
 from numpy_sim.potential_energy import LinearElasticity
 from warp_sim.mesh import WarpMesh, mat32f
 from numpy_sim.mesh import Mesh
@@ -15,21 +19,6 @@ from warp_sim.potential_energy import psi_linear, dpsi_dF_linear, d2psi_dF2_line
 from numpy_sim.simulation import Simulation as SS
 
 EPSILON = 1e-8
-
-
-@wp.kernel
-def ke_sparse_to_dense(rows: wp.array[int], cols: wp.array[int], vals: wp.array[Any], de: wp.array2d[Any]):
-    tid = wp.tid()
-    de[rows[tid], cols[tid]] = vals[tid]
-
-
-def sparse_to_dense(sp: sparse.bsr_matrix_t[Any]) -> wp.array2d[Any]:
-    out = wp.empty((sp.nrow, sp.ncol), dtype=sp.dtype)
-    wp.launch(kernel=ke_sparse_to_dense,
-              dim=sp.nnz,
-              inputs=[sp.uncompress_rows(), sp.columns, sp.values, out],
-              device='cuda')
-    return out
 
 
 # noinspection PyTypeHints
@@ -100,6 +89,9 @@ def dE_pot_dx(E: wp.array2d[int],
     :param denergy: output array
     """
     element = wp.tid()
+    v0 = E[element, 0]
+    v1 = E[element, 1]
+    v2 = E[element, 2]
 
     dphi = E_dphi_dX[element]
     # B = dF/dx - based on lecture video
@@ -114,9 +106,6 @@ def dE_pot_dx(E: wp.array2d[int],
     F = Fs[element]
     dpsi = dpsi_dF_linear(params, F)  # (4,) - call helper based on elasticity model
     dE = wp.transpose(B) @ dpsi * E_vol0[element]  # (6,)
-    v0 = E[element, 0]
-    v1 = E[element, 1]
-    v2 = E[element, 2]
     # assemble gradient to vertices rather than just per element
     # this should use atomic_add by default so it should be thread-safe
     denergy[v0] += dE[0:2]
@@ -147,6 +136,9 @@ def d2E_pot_dx2(E: wp.array2d[int],
     :param vals: vals[i] is matrix block to put at (rows[i], cols[i])
     """
     element = wp.tid()
+    v0 = E[element, 0]
+    v1 = E[element, 1]
+    v2 = E[element, 2]
 
     dphi = E_dphi_dX[element]
     # B = dF/dx - based on lecture video
@@ -161,9 +153,7 @@ def d2E_pot_dx2(E: wp.array2d[int],
     F = Fs[element]
     d2psi = d2psi_dF2_linear(params, F)  # (4,)
     d2E = wp.transpose(B) @ d2psi @ B * E_vol0[element]  # (6,)
-    v0 = E[element, 0]
-    v1 = E[element, 1]
-    v2 = E[element, 2]
+
     rows[element * 9 + 0] = v0
     cols[element * 9 + 0] = v0
     vals[element * 9 + 0] = d2E[0:2, 0:2]
@@ -209,7 +199,7 @@ class Simulation:
                   inputs=[wm.x, self.m0.E, self.m0.E_dphi_dX, self.Fs],
                   device='cuda')
 
-    def E_total(self, m_curr: WarpMesh, vel: wp.array[wp.vec2f], h: float, wm: WarpMesh) -> float:
+    def E_step(self, m_curr: WarpMesh, vel: wp.array[wp.vec2f], h: float, wm: WarpMesh) -> float:
         """
         must call compute_Fs before this!!
         :param m_curr:
@@ -228,7 +218,7 @@ class Simulation:
         K = 0.5 / h ** 2 * wp.utils.array_inner(wm.x - y, self.m0.M @ (wm.x - y))
         return V + K
 
-    def dE_total_dx(self, m_curr: WarpMesh, vel: wp.array[wp.vec2f], h: float, wm: WarpMesh) -> wp.array[wp.vec2f]:
+    def dE_step_dx(self, m_curr: WarpMesh, vel: wp.array[wp.vec2f], h: float, wm: WarpMesh) -> wp.array[wp.vec2f]:
         """
         must call compute_Fs before this!!
         :param m_curr:
@@ -251,7 +241,7 @@ class Simulation:
         dK_dx = self.m0.M @ (wm.x - y) / h ** 2
         return dV_dx + dK_dx
 
-    def d2E_total_dx2(self, m_curr: WarpMesh, vel: wp.array[wp.vec2f], h: float, wm: WarpMesh) -> sparse.bsr_matrix_t[
+    def d2E_step_dx2(self, m_curr: WarpMesh, vel: wp.array[wp.vec2f], h: float, wm: WarpMesh) -> sparse.bsr_matrix_t[
         wp.mat22f]:
         """
         must call compute_Fs before this!!
@@ -294,56 +284,24 @@ class Simulation:
         m_new.x += h * vel  # so this line also edits m_new.V
         # print('energy:', self.E_total(m, m_prev, h, m))
         self.compute_Fs(m_new)
-        g = self.dE_total_dx(m, vel, h, m_new)
+        g = self.dE_step_dx(m, vel, h, m_new)
         steps = 0
         while wp.utils.array_inner(g, g) > EPSILON and steps < 100:
             self.compute_Fs(m_new)
-            g = self.dE_total_dx(m, vel, h, m_new)
-            H = self.d2E_total_dx2(m, vel, h, m_new)
+            g = self.dE_step_dx(m, vel, h, m_new)
+            H = self.d2E_step_dx2(m, vel, h, m_new)
             d = wp.empty_like(g)
             linear.gmres(H, -g, d)
-            print(d)  # seems like it's blowing up
             m_new.x += d
             # could add line search
             steps += 1
         return m_new
 
 
-def main_func():
-    m0 = Mesh(filename='../test_mesh.txt')
-    m0.precompute()
-    m_def = m0.copy()
-    m_def.V[:, 1] *= 2
-    p = MaterialParams()
-    p.mu_lame = 1.
-    p.lambda_lame = 1.
-
-    wm0 = WarpMesh(m0)
-    wm0.precompute()
-    wm_def = WarpMesh(m_def)
-
-    h = 0.1
-
-    s = Simulation(wm0, p)
-    s.compute_Fs(wm_def)
-    vel = wm_def.x - wm0.x
-    # print('E:', s.E_total(wm_def, vel, h, wm_def))
-    # print('dE_dx:', s.dE_total_dx(wm_def, vel, h, wm_def))
-    d2 = s.d2E_total_dx2(wm_def, vel, h, wm_def)
-    # print('d2E_dx2:', s.d2E_total_dx2(wm_def, vel, h, wm_def))
-    d2_dense = sparse_to_dense(d2)
-
-    d2_numpy = np.block([[block for block in row] for row in d2_dense.numpy()])
-
-    ss = SS(m0, LinearElasticity(1, 1))
-    d2_cpu = ss.d2E_total_dx2(m_def, (m_def.x() - m0.x()) / h, h, m_def)
-
-    # np.set_printoptions(suppress=True)
-    # print(d2_numpy)
-    # print(d2_cpu)
-
-
 if __name__ == '__main__':
+    h = 0.01
+    max_frames = 1e10
+
     wp.init()
     renderer = render.OpenGLRenderer(draw_sky=False,
                                      draw_grid=False,
@@ -355,30 +313,30 @@ if __name__ == '__main__':
                                      screen_height=1024,
                                      headless=False)
     m0 = Mesh(filename='../test_mesh.txt')
-    m0.precompute()
+    m0.centre_at_zero()
     m_def = m0.copy()
-    m_def.V[:, 1] *= 2
+    m_def.V[:, 0] += 0.001
+    m_def.V[:, 1] *= 1.01
+
     p = MaterialParams()
     p.mu_lame = 1.
     p.lambda_lame = 1.
 
     wm0 = WarpMesh(m0)
     m_curr = WarpMesh(m_def)
-    m_prev = m_curr
+    m_prev = wm0
 
-    h = 0.1
     s = Simulation(wm0, p)
 
     frame = 0
-    while renderer.is_running():
-        # print(f'x={m_curr.x()}')
+    while renderer.is_running() and frame < max_frames:
         m_next = s.timestep(m_curr, m_prev, h)
         m_prev = m_curr.copy()
         m_curr = m_next.copy()
 
         renderer.begin_frame()
-        renderer.render_mesh('undeformed', m0.V_3d(), m0.E, colors=(1, 1, 1))
-        renderer.render_mesh('deformed', m_curr.V_3d(), m0.E)
+        renderer.render_mesh('undeformed', m0.V_3d(), m0.E, colors=(1., 0., 0.))
+        renderer.render_mesh('deformed', m_curr.V_3d(), m0.E, colors=(0., 0., 1.))
         renderer.end_frame()
         print(f'frame: {frame}')
         frame += 1

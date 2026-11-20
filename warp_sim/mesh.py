@@ -17,7 +17,9 @@ class WarpMesh:
     E_vol0: wp.array[float]
     E_dphi_dX: wp.array[mat32f]
 
-    def __init__(self, m: Mesh):
+    def __init__(self, m: Mesh = None):
+        if m is None:
+            return
         self.num_verts = m.V.shape[0]
         self.num_elements = m.E.shape[0]
         self.x = wp.array(m.V, dtype=float).view(dtype=wp.vec2f)
@@ -111,7 +113,6 @@ def compute_dphi_dX(V: wp.array[wp.vec2f],
 
 
 if __name__ == "__main__":
-    m = Mesh(filename='../test_mesh.txt')
+    m = Mesh(filename='../triangle.txt')
     wm = WarpMesh(m)
-    # print(wm.E_dphi_dX.numpy())
-    print(wm.V_3d())
+    print(wm.M)

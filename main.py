@@ -12,12 +12,12 @@ import subprocess  # basic system calls + gifski for creating gifs
 from datetime import datetime
 
 if __name__ == "__main__":
-    save_gif = True
-    headless = True
+    save_gif = False
+    headless = False
     screen_width = 1024
     screen_height = 1024
-    max_frames = 500
-    h = 0.02
+    max_frames = 1e10
+    h = 0.01
     wp.init()
     renderer = warp.render.OpenGLRenderer(draw_sky=False,
                                           draw_grid=False,
@@ -33,12 +33,10 @@ if __name__ == "__main__":
     m0.centre_at_zero()
 
     m_curr = m0.copy()
-    # m_deformed.V += np.array([1, 0])  # everything still works if i translate !!! woo !!!!!
-    m_curr.V[:, 1] *= 0.5
+    m_curr.V[:, 0] += 0.001
+    m_curr.V[:, 1] *= 1.01
 
     m_prev = m0.copy()
-    m_prev.V[:, 1] *= 0.5
-    m_prev.V += np.array([-0.005, 0])  # can give initial velocity by nudging m_prev
 
     s = Simulation(m0, LinearElasticity(1, 1))
 
@@ -54,9 +52,11 @@ if __name__ == "__main__":
         m_curr = m_next.copy()
 
         renderer.begin_frame()
-        renderer.render_mesh('undeformed', m0.V_3d(), m0.E, colors=(1, 1, 1))
-        renderer.render_mesh('deformed', m_curr.V_3d(), m_curr.E)
+        renderer.render_mesh('undeformed', m0.V_3d(), m0.E, colors=(1., 0., 0.))
+        renderer.render_mesh('deformed', m_curr.V_3d(), m_curr.E, colors=(0., 0., 1.))
         renderer.end_frame()
+
+        print(s.E_total(m_curr, (m_curr.x() - m_prev.x()) / h))
 
         if save_gif:
             image = wp.empty((screen_height, screen_width, 3), dtype=wp.uint8, device='cuda')
