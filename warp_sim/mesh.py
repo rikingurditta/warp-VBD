@@ -50,7 +50,7 @@ class WarpMesh:
                         block = np.array([[vol / 24, 0],
                                           [0, vol / 24]])
                         rows.append(v)
-                        cols.append(v)
+                        cols.append(w)
                         vals.append(block)
 
         rows = wp.array(rows, dtype=int)
