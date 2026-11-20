@@ -237,7 +237,7 @@ class Simulation:
         :param wm:
         :return:
         """
-        dV_dx = wp.empty(shape=self.m0.num_verts, dtype=wp.vec2f)
+        dV_dx = wp.zeros(shape=self.m0.num_verts, dtype=wp.vec2f)
         wp.launch(kernel=dE_pot_dx,
                   dim=self.m0.num_elements,
                   inputs=[self.m0.E,
@@ -261,9 +261,9 @@ class Simulation:
         :param wm:
         :return:
         """
-        rows = wp.empty(shape=self.m0.num_elements * 9, dtype=int)
-        cols = wp.empty(shape=self.m0.num_elements * 9, dtype=int)
-        vals = wp.empty(shape=self.m0.num_elements * 9, dtype=wp.mat22f)
+        rows = wp.zeros(shape=self.m0.num_elements * 9, dtype=int)
+        cols = wp.zeros(shape=self.m0.num_elements * 9, dtype=int)
+        vals = wp.zeros(shape=self.m0.num_elements * 9, dtype=wp.mat22f)
         wp.launch(kernel=d2E_pot_dx2,
                   dim=self.m0.num_elements,
                   inputs=[self.m0.E,
