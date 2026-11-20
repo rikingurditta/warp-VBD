@@ -17,9 +17,7 @@ class WarpMesh:
     E_vol0: wp.array[float]
     E_dphi_dX: wp.array[mat32f]
 
-    def __init__(self, m: Mesh | None):
-        if m is None:
-            return
+    def __init__(self, m: Mesh):
         self.num_verts = m.V.shape[0]
         self.num_elements = m.E.shape[0]
         self.x = wp.array(m.V, dtype=float).view(dtype=wp.vec2f)

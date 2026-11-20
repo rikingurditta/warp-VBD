@@ -31,7 +31,6 @@ if __name__ == "__main__":
 
     m0 = Mesh(filename='test_mesh.txt')
     m0.centre_at_zero()
-    m0.precompute()
 
     m_curr = m0.copy()
     # m_deformed.V += np.array([1, 0])  # everything still works if i translate !!! woo !!!!!

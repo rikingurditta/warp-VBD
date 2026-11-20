@@ -48,8 +48,6 @@ class Mesh:
 
         self.E_vol0 = np.zeros(self.E.shape[0])  # = Area in 2D
         self.M = np.zeros((self.V.flatten().size, self.V.flatten().size))
-
-    def precompute(self):
         self.E_vol0 = triangle_areas(self)
         for e in range(self.E.shape[0]):
             vol = self.E_vol0[e]
