@@ -1,9 +1,4 @@
-from numpy_sim.potential_energy import *
-from numpy_sim.mesh import Mesh
-from numpy_sim.simulation import Simulation
-
 import numpy as np
-
 import warp as wp
 import warp.render
 
@@ -11,7 +6,16 @@ from PIL import Image
 import subprocess  # basic system calls + gifski for creating gifs
 from datetime import datetime
 
-if __name__ == "__main__":
+from fem_numpy.potential_energy import *
+from fem_numpy.mesh import Mesh
+from fem_numpy.simulation import Simulation as Simulation_np
+
+from fem_warp.mesh import WarpMesh
+from fem_warp.potential_energy import MaterialParams
+from fem_warp.simulation import Simulation as Simulation_wp
+
+
+def run_numpy_fem():
     save_gif = False
     headless = False
     screen_width = 1024
@@ -38,7 +42,7 @@ if __name__ == "__main__":
 
     m_prev = m0.copy()
 
-    s = Simulation(m0, LinearElasticity(1, 1))
+    s = Simulation_np(m0, LinearElasticity(1, 1))
 
     if save_gif:
         subprocess.run(['mkdir', 'run'])
@@ -73,3 +77,51 @@ if __name__ == "__main__":
         time = datetime.now().strftime('%Y-%m-%d-%H:%M:%S')
         subprocess.run(f'gifski --output animations/ani-{time}.gif --fps 60 run/*.png', shell=True)
         print('done!')
+
+
+def run_warp_fem():
+    h = 0.01
+    max_frames = 1e10
+
+    wp.init()
+    renderer = warp.render.OpenGLRenderer(draw_sky=False,
+                                     draw_grid=False,
+                                     draw_axis=False,
+                                     camera_pos=(2, 0, 10),
+                                     render_wireframe=True,
+                                     background_color=(1, 1, 1),
+                                     screen_width=1024,
+                                     screen_height=1024,
+                                     headless=False)
+    m0 = Mesh(filename='test_mesh.txt')
+    m0.centre_at_zero()
+    m_def = m0.copy()
+    m_def.V[:, 0] += 0.001
+    m_def.V[:, 1] *= 1.01
+
+    p = MaterialParams()
+    p.mu_lame = 1.
+    p.lambda_lame = 1.
+
+    wm0 = WarpMesh(m0)
+    m_curr = WarpMesh(m_def)
+    m_prev = wm0
+
+    s = Simulation_wp(wm0, p)
+
+    frame = 0
+    while renderer.is_running() and frame < max_frames:
+        m_next = s.timestep(m_curr, m_prev, h)
+        m_prev = m_curr.copy()
+        m_curr = m_next.copy()
+
+        renderer.begin_frame()
+        renderer.render_mesh('undeformed', m0.V_3d(), m0.E, colors=(1., 0., 0.))
+        renderer.render_mesh('deformed', m_curr.V_3d(), m0.E, colors=(0., 0., 1.))
+        renderer.end_frame()
+        print(f'frame: {frame}')
+        frame += 1
+
+if __name__ == "__main__":
+    # run_numpy_fem()
+    run_warp_fem()

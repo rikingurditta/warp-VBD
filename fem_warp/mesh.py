@@ -1,5 +1,5 @@
 from typing import List
-from numpy_sim.mesh import Mesh
+from fem_numpy.mesh import Mesh
 import warp as wp
 import warp.sparse as sparse
 import numpy as np

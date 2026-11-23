@@ -7,16 +7,16 @@ import warp.render as render
 
 import numpy as np
 
-from warp_sim.util import sparse_mat_array_to_numpy_blocks
+from fem_warp.util import sparse_mat_array_to_numpy_blocks
 
 np.set_printoptions(suppress=True)
 
-from numpy_sim.potential_energy import LinearElasticity
-from warp_sim.mesh import WarpMesh, mat32f
-from numpy_sim.mesh import Mesh
-from warp_sim.potential_energy import psi_linear, dpsi_dF_linear, d2psi_dF2_linear, MaterialParams
+from fem_numpy.potential_energy import LinearElasticity
+from fem_warp.mesh import WarpMesh, mat32f
+from fem_numpy.mesh import Mesh
+from fem_warp.potential_energy import psi_linear, dpsi_dF_linear, d2psi_dF2_linear, MaterialParams
 
-from numpy_sim.simulation import Simulation as SS
+from fem_numpy.simulation import Simulation as SS
 
 EPSILON = 1e-8
 
@@ -296,47 +296,3 @@ class Simulation:
             # could add line search
             steps += 1
         return m_new
-
-
-if __name__ == '__main__':
-    h = 0.01
-    max_frames = 1e10
-
-    wp.init()
-    renderer = render.OpenGLRenderer(draw_sky=False,
-                                     draw_grid=False,
-                                     draw_axis=False,
-                                     camera_pos=(2, 0, 10),
-                                     render_wireframe=True,
-                                     background_color=(1, 1, 1),
-                                     screen_width=1024,
-                                     screen_height=1024,
-                                     headless=False)
-    m0 = Mesh(filename='../test_mesh.txt')
-    m0.centre_at_zero()
-    m_def = m0.copy()
-    m_def.V[:, 0] += 0.001
-    m_def.V[:, 1] *= 1.01
-
-    p = MaterialParams()
-    p.mu_lame = 1.
-    p.lambda_lame = 1.
-
-    wm0 = WarpMesh(m0)
-    m_curr = WarpMesh(m_def)
-    m_prev = wm0
-
-    s = Simulation(wm0, p)
-
-    frame = 0
-    while renderer.is_running() and frame < max_frames:
-        m_next = s.timestep(m_curr, m_prev, h)
-        m_prev = m_curr.copy()
-        m_curr = m_next.copy()
-
-        renderer.begin_frame()
-        renderer.render_mesh('undeformed', m0.V_3d(), m0.E, colors=(1., 0., 0.))
-        renderer.render_mesh('deformed', m_curr.V_3d(), m0.E, colors=(0., 0., 1.))
-        renderer.end_frame()
-        print(f'frame: {frame}')
-        frame += 1
