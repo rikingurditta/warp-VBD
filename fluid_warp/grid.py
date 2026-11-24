@@ -1,4 +1,7 @@
+import numpy as np
 import warp as wp
+import matplotlib.pyplot
+from matplotlib import pyplot as plt
 
 
 @wp.struct
@@ -8,6 +11,24 @@ class Grid:
     height: int  # vertically, grid has height points, aka height-1 cells
     dx: float  # cell width
     q: wp.array2d[float]  # dim=(width, height)
+
+
+@wp.func
+def serialize_coord(i: int, j: int, g: Grid) -> int:
+    """
+    :param i: row
+    :param j: col
+    :param g: grid
+    :return: index so that g.q[i, j] = g.q.flatten()[index]
+    """
+    return i * g.height + j
+
+
+@wp.kernel
+def random_init(seed: int, g: Grid):
+    i, j = wp.tid()
+    rng = wp.rand_init(seed, serialize_coord(i, j, g))
+    g.q[i, j] = wp.randf(rng)
 
 
 def make_grid(width: int, height: int, dx: float) -> Grid:
@@ -42,14 +63,14 @@ def query_grid(g: Grid, p: wp.vec2f) -> float:
     :return: linearly interpolated result  # TODO: use cubic interpolation
     """
     # transform point to mesh coordinates
-    x = wp.clamp(p[0] / g.dx, 0., float(g.width))
-    y = wp.clamp(p[1] / g.dx, 0., float(g.height))
+    x = wp.clamp(p[0] / g.dx, 0., float(g.width - 1))
+    y = wp.clamp(p[1] / g.dx, 0., float(g.height - 1))
 
     # get indices of cell corners around point
-    x0 = wp.clamp(int(wp.floor(x)), 0, g.width)
-    x1 = wp.clamp(int(wp.ceil(x)), 0, g.width)
-    y0 = wp.clamp(int(wp.floor(y)), 0, g.height)
-    y1 = wp.clamp(int(wp.ceil(y)), 0, g.height)
+    x0 = wp.clamp(int(wp.floor(x)), 0, g.width - 1)
+    x1 = wp.clamp(int(wp.ceil(x)), 0, g.width - 1)
+    y0 = wp.clamp(int(wp.floor(y)), 0, g.height - 1)
+    y1 = wp.clamp(int(wp.ceil(y)), 0, g.height - 1)
 
     t_x = x - float(x0)
     t_y = y - float(y0)
@@ -139,3 +160,45 @@ def divergence(u: Grid, v: Grid, out: Grid):
     i, j = wp.tid()
     out.q[i, j] = (u.q[i + 1, j] - u.q[i, j] + v.q[i, j + 1] - v.q[i, j]) / out.dx
 
+def compute_divergence(u: Grid, v: Grid) -> Grid:
+    out = make_grid(v.width, u.height, u.dx)
+    wp.launch(kernel=divergence,
+              dim=out.q.shape,
+              inputs=[u, v, out],
+              device='cuda')
+    return out
+
+
+@wp.kernel
+def sample_vector_field(u: Grid, v: Grid, u_out: Grid, v_out: Grid):
+    """
+    uniformly samples staggered grid vector field onto non-staggered vector field
+    u_out and v_out should have same shape
+    :param u: shape (width + 1, height)
+    :param v: shape (width, height + 1)
+    :param u_out: shape (X, Y)
+    :param v_out: shape (X, Y)
+    :return:
+    """
+    i, j = wp.tid()
+    x0 = float(i) / float(u_out.width)
+    y0 = float(j) / float(u_out.height)
+    x = x0 * u.dx * float(v.width)
+    y = y0 * v.dx * float(u.height)
+    vec = query_staggered_grid(u, v, wp.vec2f(x, y))
+    u_out.q[i, j] = vec[0]
+    v_out.q[i, j] = vec[1]
+
+
+def visualize_vector_field(u: Grid, v: Grid, ax, samples: tuple[int, int] = (10, 10), scale=1):
+    W = samples[0]
+    H = samples[1]
+    u_out = make_grid(W, H, 1)
+    v_out = copy_grid(u_out)
+    wp.launch(kernel=sample_vector_field,
+              dim=u_out.q.shape,
+              inputs=[u, v, u_out, v_out],
+              device='cuda')
+    X = np.linspace(0, v.width * u.dx, W)
+    Y = np.linspace(0, u.height * v.dx, H)
+    ax.quiver(X, Y, u_out.q.numpy().transpose(), v_out.q.numpy().transpose(), scale=scale)

@@ -1,20 +1,13 @@
-from typing import Any
-
 import warp as wp
 import warp.optim.linear as linear
 import warp.sparse as sparse
-import warp.render as render
 
 import numpy as np
 
 np.set_printoptions(suppress=True)
 
-from fem_numpy.potential_energy import LinearElasticity
 from fem_warp.mesh import WarpMesh, mat32f
-from fem_numpy.mesh import Mesh
 from fem_warp.potential_energy import psi_linear, dpsi_dF_linear, d2psi_dF2_linear, MaterialParams
-
-from fem_numpy.simulation import Simulation as SS
 
 EPSILON = 1e-8
 
