@@ -7,8 +7,6 @@ import warp.render as render
 
 import numpy as np
 
-from fem_warp.util import sparse_mat_array_to_numpy_blocks
-
 np.set_printoptions(suppress=True)
 
 from fem_numpy.potential_energy import LinearElasticity
